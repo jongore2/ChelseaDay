@@ -30,6 +30,11 @@ const dir=path.resolve(process.env.DATA_DIR||'./data'); fs.mkdirSync(dir,{recurs
 function persist(value){const temp=file+'.tmp';const fd=fs.openSync(temp,'w',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temp,file);}
 if(!fs.existsSync(file)) persist(seed);
 let data=JSON.parse(fs.readFileSync(file,'utf8'));
+if((data.data_version||1)<2){
+ const additions=seed.checkpoints.filter(item=>item.id.startsWith('conditional-')&&!data.checkpoints.some(existing=>existing.id===item.id));
+ data={...data,data_version:2,checkpoints:[...data.checkpoints,...additions]};
+ persist(data);
+}
 const app=express();app.set('trust proxy',1);app.disable('x-powered-by');app.use(helmet());app.use(express.json({limit:'64kb'}));
 app.use('/api',(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
 const sign=s=>createHmac('sha256',SESSION_SECRET).update(s).digest('base64url');
@@ -47,7 +52,7 @@ app.get('/api/dashboard',(_req,res)=>res.json({data,revision:sign(JSON.stringify
 app.use('/api',(req,res,next)=>req.session.role==='admin'?next():res.status(403).json({error:'Administrator access required.'}));
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s=>{const d=new Date(s+'T00:00:00Z');return !isNaN(d)&&d.toISOString().slice(0,10)===s;});
 const text=z.string().trim().min(1).max(2000);const money=z.number().int().positive().max(100000000);
-const schema=z.object({showingReport:showingReportSchema.nullable().optional(),property:z.object({address:z.literal(seed.property.address),original_list_date:z.literal('2026-05-02'),current_list_price:money,listing_status:z.enum(['Active','Under Contract','Pending','Closed','Temporarily Off Market']),last_reviewed:date,current_objective:text,current_action:text}).strict(),priceHistory:z.array(z.object({id:text,date,event_type:text,price:money}).strict()).min(1).max(200),checkpoints:z.array(z.object({id:text,date,title:text,description:text,status:z.enum(['Upcoming','Complete']),outcome:z.string().max(2000)}).strict()).max(200)}).strict().refine(d=>[d.priceHistory,d.checkpoints].every(rows=>new Set(rows.map(r=>r.id)).size===rows.length),'Duplicate record IDs');
+const schema=z.object({data_version:z.literal(2),showingReport:showingReportSchema.nullable().optional(),property:z.object({address:z.literal(seed.property.address),original_list_date:z.literal('2026-05-02'),current_list_price:money,listing_status:z.enum(['Active','Under Contract','Pending','Closed','Temporarily Off Market']),last_reviewed:date,current_objective:text,current_action:text}).strict(),priceHistory:z.array(z.object({id:text,date,event_type:text,price:money}).strict()).min(1).max(200),checkpoints:z.array(z.object({id:text,date:date.nullable(),title:text,description:text,status:z.enum(['Upcoming','Complete']),outcome:z.string().max(2000)}).strict()).max(200)}).strict().refine(d=>[d.priceHistory,d.checkpoints].every(rows=>new Set(rows.map(r=>r.id)).size===rows.length),'Duplicate record IDs');
 app.put('/api/dashboard',(req,res)=>{if(req.body.revision!==sign(JSON.stringify(data)))return res.status(409).json({error:'Another update was saved. Reload the page before editing again.'});const parsed=schema.safeParse(req.body.data);if(!parsed.success)return res.status(400).json({error:'Check all fields: valid dates, positive whole-dollar prices, and required text are needed.'});persist(parsed.data);data=parsed.data;res.json({data,revision:sign(JSON.stringify(data))});});
 app.post('/api/review',(_req,res)=>{const updated={...data,property:{...data.property,last_reviewed:today()}};persist(updated);data=updated;res.json({data,revision:sign(JSON.stringify(data))});});
 app.use('/api',(_req,res)=>res.status(404).json({error:'Not found.'}));
