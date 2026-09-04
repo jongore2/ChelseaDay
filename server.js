@@ -11,7 +11,19 @@ import {today} from './shared.js';
 const root=path.dirname(fileURLToPath(import.meta.url));
 const production=process.env.NODE_ENV==='production';
 const {VIEWER_PASSWORD,ADMIN_PASSWORD,SESSION_SECRET}=process.env;
-if(!VIEWER_PASSWORD||!ADMIN_PASSWORD||!SESSION_SECRET||VIEWER_PASSWORD.length<16||ADMIN_PASSWORD.length<16||SESSION_SECRET.length<32||VIEWER_PASSWORD===ADMIN_PASSWORD) throw Error('Set distinct passwords of at least 16 characters and a SESSION_SECRET of at least 32 characters.');
+const configurationErrors = [];
+for (const [name, value, minimum] of [
+  ['VIEWER_PASSWORD', VIEWER_PASSWORD, 16],
+  ['ADMIN_PASSWORD', ADMIN_PASSWORD, 16],
+  ['SESSION_SECRET', SESSION_SECRET, 32],
+]) {
+  if (!value) configurationErrors.push(name + ' is missing or empty');
+  else if (value.length < minimum) configurationErrors.push(name + ' is too short (minimum ' + minimum + ' characters)');
+}
+if (VIEWER_PASSWORD && ADMIN_PASSWORD && VIEWER_PASSWORD === ADMIN_PASSWORD) {
+  configurationErrors.push('VIEWER_PASSWORD and ADMIN_PASSWORD are identical; use different passwords');
+}
+if (configurationErrors.length) throw Error('Environment configuration: ' + configurationErrors.join('; ') + '. Update these values in this Render service Environment settings and save/deploy.');
 if(production&&!process.env.APP_ORIGIN?.startsWith('https://')) throw Error('Production requires an HTTPS APP_ORIGIN.');
 const dir=path.resolve(process.env.DATA_DIR||'./data'); fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,'dashboard.json');
 function persist(value){const temp=file+'.tmp';const fd=fs.openSync(temp,'w',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temp,file);}
